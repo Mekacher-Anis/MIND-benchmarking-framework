@@ -1,0 +1,9 @@
+torch
+pytorch_lightning
+orjson
+gensim
+gaisTokenizer @ git+https://github.com/aqweteddy/GaisTokenizer@master
+einops
+pytorch_ranger
+recommenders[examples]
+torchmetrics

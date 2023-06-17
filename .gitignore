@@ -1,0 +1,7 @@
+*.out
+lightning_logs/
+word2vec/*
+data
+*.zip
+.*/
+__py*/
