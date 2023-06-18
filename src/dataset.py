@@ -14,13 +14,13 @@ import pandas as pd
 
 class Dataset(data.Dataset):
     def __init__(self, data_path: str, w2v, maxlen: int = 15, pos_num: int = 1, neg_k: int = 4, dataset_size: str = 'small'):
+        self.dataset_size = dataset_size
         train_path, valid_path = self.download(data_path)
         self.articles = self.load_json(os.path.join(train_path, 'news.json'))
         self.users = self.load_json(os.path.join(train_path, 'users.json'))
         self.maxlen = maxlen
         self.neg_k = neg_k
         self.pos_num = pos_num
-        self.dataset_size = dataset_size
 
         self.w2id = w2v.key_to_index
 
