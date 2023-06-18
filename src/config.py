@@ -1,5 +1,5 @@
 hparams = {
-    'batch_size': 1,
+    'batch_size': 100,
     'lr': 5e-4,
     'name': 'ranger',
     'version': 'v3',
@@ -16,6 +16,7 @@ hparams = {
     'data': {
         'pos_k': 1,
         'neg_k': 4,
-        'maxlen': 15
+        'maxlen': 15,
+        'dataset_size': 'small' # 'small', 'large', 'demo'     
     }
 }

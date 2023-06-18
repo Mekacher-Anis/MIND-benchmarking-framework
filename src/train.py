@@ -22,6 +22,7 @@ class Model(pl.LightningModule):
         self.model = NRMS(hparams["model"], torch.tensor(self.w2v.vectors))
         self.save_hyperparameters(hparams)
         self.automatic_optimization = False
+        self.training_step_outputs = []
 
     def configure_optimizers(self):
         # return torch.optim.Adam(self.parameters(), lr=self.hparams['lr'], weight_decay=1e-5)
@@ -41,6 +42,7 @@ class Model(pl.LightningModule):
             maxlen=self.hparams["data"]["maxlen"],
             pos_num=d["pos_k"],
             neg_k=d["neg_k"],
+            dataset_size=d["dataset_size"],
         )
         self.val_ds = ValDataset(
             5, "./data", self.w2v
@@ -60,7 +62,7 @@ class Model(pl.LightningModule):
         return data.DataLoader(
             self.train_ds,
             batch_size=self.hparams["batch_size"],
-            num_workers=10,
+            num_workers=2,
             shuffle=True,
         )
 
@@ -75,7 +77,7 @@ class Model(pl.LightningModule):
             self.val_ds,
             sampler=sampler,
             batch_size=self.hparams["batch_size"],
-            num_workers=10,
+            num_workers=2,
             drop_last=True,
             shuffle=False
         )
@@ -101,21 +103,21 @@ class Model(pl.LightningModule):
         self.manual_backward(loss)
         
         optimizer = self.optimizers()
-        scheduler = self.lr_schedulers()
 
         optimizer.step()
         optimizer.zero_grad()
-        scheduler.step()
+        
+        self.training_step_outputs.append(loss)
 
         return {"loss": loss}
 
-    def on_train_epoch_end(self, outputs):
+    def on_train_epoch_end(self):
         """for each epoch end
 
         Arguments:
             outputs: list of training_step output
         """
-        loss_mean = torch.stack([x["loss"] for x in outputs]).mean()
+        loss_mean = torch.stack(self.training_step_outputs).mean()
         logs = {"train_loss": loss_mean}
         self.model.eval()
 
@@ -180,7 +182,8 @@ class Model(pl.LightningModule):
             "ndcg@5": ndcg5.mean(),
             "ndcg@10": ndcg10.mean(),
         }
-        # self.logger.log_metrics(logs, self.current_epoch)
+        self.log("auroc", logs["auroc"], prog_bar=True)
+        self.logger.log_metrics(logs, self.current_epoch)
         self.model.train()
         return {"progress_bar": logs, "log": logs}
 

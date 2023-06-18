@@ -7,3 +7,4 @@ einops
 pytorch_ranger
 recommenders[examples]
 torchmetrics
+tensorboard
