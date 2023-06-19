@@ -5,93 +5,106 @@ import torch
 from gensim.models import Word2Vec
 from torch.utils import data
 from tqdm import tqdm
-from recommenders.datasets import mind
+from recommenders.datasets import mind, download_utils
 import zipfile
 import os
 import json
 import pandas as pd
 
+def download_mind(path: str, dataset_size: str):
+    train_folder_path = os.path.join(path, dataset_size, 'train')
+    valid_folder_path = os.path.join(path, dataset_size, 'valid')
+    test_folder_path = os.path.join(path, dataset_size, 'test')
 
-class Dataset(data.Dataset):
-    def __init__(self, data_path: str, w2v, maxlen: int = 15, pos_num: int = 1, neg_k: int = 4, dataset_size: str = 'small'):
-        self.dataset_size = dataset_size
-        train_path, valid_path = self.download(data_path)
-        self.articles = self.load_json(os.path.join(train_path, 'news.json'))
-        self.users = self.load_json(os.path.join(train_path, 'users.json'))
-        self.maxlen = maxlen
-        self.neg_k = neg_k
-        self.pos_num = pos_num
+    # download only if not exists
+    if os.path.exists(train_folder_path) and os.path.exists(valid_folder_path) and os.path.exists(test_folder_path):
+        return {'train': train_folder_path, 'valid': valid_folder_path, 'test': test_folder_path}
 
-        self.w2id = w2v.key_to_index
+    # download zip files (recommenders doesn't download the test zip)
+    train_zip_path, valid_zip_path = mind.download_mind(size=dataset_size, dest_path=os.path.join(path, dataset_size))
+    url = mind.URL_MIND[dataset_size][0].replace('train', 'test')
+    test_zip_path = download_utils.maybe_download(url=url, work_directory=os.path.join(path, dataset_size))
 
+    # extract zip files
+    with zipfile.ZipFile(train_zip_path, 'r') as zip_ref:
+        zip_ref.extractall(train_folder_path)
+    with zipfile.ZipFile(valid_zip_path, 'r') as zip_ref:
+        zip_ref.extractall(valid_folder_path)
+    with zipfile.ZipFile(test_zip_path, 'r') as zip_ref:
+        zip_ref.extractall(test_folder_path)
 
-    def download(self, path: str):
-        train_folder_path = os.path.join(path, 'train')
-        valid_folder_path = os.path.join(path, 'valid')
-
-        # download only if not exists
-        if os.path.exists(train_folder_path) and os.path.exists(valid_folder_path):
-            return train_folder_path, valid_folder_path
-
-        train_zip_path, valid_zip_path = mind.download_mind(size=self.dataset_size, dest_path=path)
-
-        # extract zip files
-        with zipfile.ZipFile(train_zip_path, 'r') as zip_ref:
-            zip_ref.extractall(train_folder_path)
-        with zipfile.ZipFile(valid_zip_path, 'r') as zip_ref:
-            zip_ref.extractall(valid_folder_path)
-
-        self.mind2json(train_folder_path)
-        self.mind2json(valid_folder_path)
-        
-        
-        return train_folder_path, train_zip_path
+    # turn tsv to json files similar to the structure defined here
+    # https://github.com/aqweteddy/NRMS-Pytorch
+    mind2json(train_folder_path, 'train')
+    mind2json(valid_folder_path, 'valid')
     
-    def mind2json(self, path: str):
-        # turn tsv to json files
-        with open(os.path.join(path, 'news.tsv')) as f:
-            news = pd.read_csv(f, sep='\t', header=None)
-            news.columns = ['id', 'category', 'subcategory', 'title', 'abstract', 'url', 'title_entities', 'abstract_entities']
-            news.drop_duplicates(subset=['title'], inplace=True)
+    return {'train': train_folder_path, 'valid': valid_folder_path, 'test': test_folder_path}
 
-        with open(os.path.join(path, 'behaviors.tsv')) as f:
-            behaviors = pd.read_csv(f, sep='\t', header=None)
-            behaviors.columns = ['id', 'user_id', 'time', 'history', 'impressions']
-        
-        users_parsed = []
-        article_id_to_idx = {}
-        user_id_to_idx = {}
+def mind2json(path: str, dataset_type: str):
+    # turn tsv to json files
+    with open(os.path.join(path, 'news.tsv')) as f:
+        news = pd.read_csv(f, sep='\t', header=None)
+        news.columns = ['id', 'category', 'subcategory', 'title', 'abstract', 'url', 'title_entities', 'abstract_entities']
+        news.drop_duplicates(subset=['title'], inplace=True)
 
-        for i, row in behaviors.iterrows():
-            user_id = row['user_id']
-            if user_id not in user_id_to_idx:
-                user_id_to_idx[user_id] = len(user_id_to_idx)
-            user_id = user_id_to_idx[user_id]
-            impressions = str(row['impressions']).split(' ')
-            clicked = []
-            for impression in impressions:
+    with open(os.path.join(path, 'behaviors.tsv')) as f:
+        behaviors = pd.read_csv(f, sep='\t', header=None)
+        behaviors.columns = ['id', 'user_id', 'time', 'history', 'impressions']
+    
+    users_parsed = []
+    article_id_to_idx = {}
+    user_id_to_idx = {}
+
+    for i, row in behaviors.iterrows():
+        user_id = row['user_id']
+        if user_id not in user_id_to_idx:
+            user_id_to_idx[user_id] = len(user_id_to_idx)
+        user_id = user_id_to_idx[user_id]
+        impressions = str(row['impressions']).split(' ')
+        clicked = []
+        for impression in impressions:
+            if dataset_type == 'test':
+                article_id = impression
+            else:
                 article_id, label = impression.split('-')
                 if label == '0':
                     continue
                 # get article idx
-                if article_id not in article_id_to_idx:
-                    article_id_to_idx[article_id] = len(article_id_to_idx)
-                clicked.append(article_id_to_idx[article_id])
-            users_parsed.append({'user_id': user_id, 'push': clicked})
-        
-        news_parsed = []
-
-        for i, row in news.iterrows():
-            article_id = row['id']
             if article_id not in article_id_to_idx:
                 article_id_to_idx[article_id] = len(article_id_to_idx)
-            article_id = article_id_to_idx[article_id]
-            # title is category + subcategory + title
-            title = ['[', row['category'], row['subcategory'], ']', *row['title'].split(' ')]
-            news_parsed.append({'id': article_id, 'title': title})
-        
-        json.dump(users_parsed, open(os.path.join(path, 'users.json'), 'w'))
-        json.dump(news_parsed, open(os.path.join(path, 'news.json'), 'w'))
+            clicked.append(article_id_to_idx[article_id])
+        history = str(row['history']).split(' ')
+        for article_id in history:
+            if article_id not in article_id_to_idx:
+                article_id_to_idx[article_id] = len(article_id_to_idx)
+        users_parsed.append({'user_id': user_id, 'push': clicked, 'history': history})
+    
+    news_parsed = []
+
+    for i, row in news.iterrows():
+        article_id = row['id']
+        if article_id not in article_id_to_idx:
+            article_id_to_idx[article_id] = len(article_id_to_idx)
+        article_id = article_id_to_idx[article_id]
+        # title is category + subcategory + title
+        title = ['[', row['category'], row['subcategory'], ']', *row['title'].split(' ')]
+        news_parsed.append({'id': article_id, 'title': title})
+    
+    json.dump(users_parsed, open(os.path.join(path, 'users.json'), 'w'))
+    json.dump(news_parsed, open(os.path.join(path, 'news.json'), 'w'))
+    
+
+class Dataset(data.Dataset):
+    def __init__(self, data_path: str, w2v, maxlen: int = 15, pos_num: int = 1, neg_k: int = 4, dataset_size: str = 'small', data_type: str = 'train'):
+        self.dataset_size = dataset_size
+        self.data_type = data_type
+        self.paths = download_mind(data_path, dataset_size)
+        self.articles = self.load_json(os.path.join(self.paths[data_type], 'news.json'))
+        self.users = self.load_json(os.path.join(self.paths[data_type], 'users.json'))
+        self.maxlen = maxlen
+        self.neg_k = neg_k
+        self.pos_num = pos_num
+        self.w2id = w2v.key_to_index
 
     def load_json(self, file: str):
         with open(file, 'r') as f:
@@ -157,6 +170,7 @@ class Dataset(data.Dataset):
 
 class ValDataset(Dataset):
     def __init__(self, num=5, *args, **kwargs) -> None:
+        kwargs['data_type'] = 'valid'
         super(ValDataset, self).__init__(*args, **kwargs)
         self.num = num
     
@@ -180,10 +194,49 @@ class ValDataset(Dataset):
         return torch.LongTensor(click_doc), torch.LongTensor(cand_doc), torch.LongTensor(cand_doc_label)
 
 
+class TestDataset(data.Dataset):
+    def __init__(self, data_path: str, w2v, maxlen: int = 15, dataset_size: str = 'small'):
+        self.dataset_size = dataset_size
+        self.paths = download_mind(data_path, dataset_size)
+        
+        with open(os.path.join(self.paths['test'], 'news.tsv')) as f:
+            self.news = pd.read_csv(f, sep='\t', header=None)
+            self.news.columns = ['id', 'category', 'subcategory', 'title', 'abstract', 'url', 'title_entities', 'abstract_entities']
+            self.news.drop_duplicates(subset=['title'], inplace=True)
+
+        with open(os.path.join(self.paths['test'], 'behaviors.tsv')) as f:
+            self.behaviors = pd.read_csv(f, sep='\t', header=None)
+            self.behaviors.columns = ['id', 'user_id', 'time', 'history', 'impressions']
+            self.history = self.behaviors['history'].apply(lambda x: x.split(' '))
+            self.impressions = self.behaviors['impressions'].apply(lambda x: x.split(' '))
+            
+        self.maxlen = maxlen
+        self.w2id = w2v.key_to_index
+
+
+    def sent2idx(self, tokens: List[str]):
+        # tokens = tokens[3:]
+        if ']' in tokens:
+            tokens = tokens[tokens.index(']'):]
+        tokens = [self.w2id[token.strip()]
+                  for token in tokens if token.strip() in self.w2id.keys()]
+        tokens += [0] * (self.maxlen - len(tokens))
+        tokens = tokens[:self.maxlen]
+        return tokens
+
+    def __len__(self):
+        return len(self.behaviors.index)
+    
+    def __getitem__(self, idx: int):
+        history = self.behaviors[idx]['history']
+        impressions = self.behaviors[idx]['impressions']
+        impid = self.behaviors[idx]['id']
+        history_enc = [self.news[self.news['id'] == p]['title'].item() for p in history]        
+        cand_imp = [self.news[self.news['id'] == p]['title'].item() for p in impressions]
+        return impid, history_enc, cand_imp
+        # history_enc = [self.sent2idx(self.news[self.news['id'] == p]['title'].item()) for p in history]        
+        # cand_imp = [self.sent2idx(self.news[self.news['id'] == p]['title'].item()) for p in impressions]
+        # return impid, torch.LongTensor(history_enc), torch.LongTensor(cand_imp)
+
 if __name__ == '__main__':
-    w2v = Word2Vec.load('./word2vec/wiki_300d_5ws.model')
-    ds = ValDataset(50, './data/articles.json', './data/users_list.json',
-                 w2v, maxlen=30, pos_num=50, neg_k=4)
-    print(ds[10])
-    for i in tqdm(ds):
-        pass
+    download_mind('./data', 'large')

@@ -17,6 +17,6 @@ hparams = {
         'pos_k': 1,
         'neg_k': 4,
         'maxlen': 15,
-        'dataset_size': 'small' # 'small', 'large', 'demo'     
+        'dataset_size': 'large' # 'small', 'large', 'demo'     
     }
 }

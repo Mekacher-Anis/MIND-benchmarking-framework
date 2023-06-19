@@ -4,17 +4,21 @@ import torch
 from models.nrms import NRMS
 from typing import List
 from gaisTokenizer import Tokenizer
+import argparse
+from dataset import TestDataset
+from gensim.models import Word2Vec, KeyedVectors
+import gensim.downloader as api
 
 
 class Model(pl.LightningModule):
     def __init__(self, hparams):
         super(Model, self).__init__()
-        self.w2v = Word2Vec.load(hparams['pretrained_model'])
-        self.w2id = {w: self.w2v.wv.vocab[w].index for w in self.w2v.wv.vocab}
-
-        if hparams['model']['dct_size'] == 'auto':
-            hparams['model']['dct_size'] = len(self.w2v.wv.vocab)
-        self.model = NRMS(hparams['model'], torch.tensor(self.w2v.wv.vectors))
+        self.w2v: KeyedVectors = api.load(hparams["pretrained_model"])
+        if hparams["model"]["dct_size"] == "auto":
+            hparams["model"]["dct_size"] = len(self.w2v.key_to_index)
+        self.model = NRMS(hparams["model"], torch.tensor(self.w2v.vectors))
+        self.w2id = self.w2v.key_to_index
+        
         self.hparams = hparams
         self.maxlen = hparams['data']['maxlen']
         self.tokenizer = Tokenizer('k95763565C5F785B50546754545D77505F0325160B58173C17291B3D5E2500135001671C06272B3B06281E1E5E55A9F7EB80C0E58AD1EB50AC')
@@ -67,18 +71,20 @@ def print_func(r):
     for t in r:
         print(''.join(t))
     
-if __name__ == '__main__':
-    import json, random
-    with open('./data/articles.json', 'r') as f:
-        articles = json.loads(f.read())
-    with open('./data/users_list.json', 'r') as f:
-        users = json.loads(f.read())
-    nrms = Model.load_from_checkpoint('lightning_logs/ranger/v3/epoch=30-auroc=0.89.ckpt')
-    viewed = users[1001]['push'][:50]
-    viewed = [articles[v]['title'] for v in viewed]
-    print_func(viewed)
-    cands = [a['title'] for a in random.sample(articles, 20)] + viewed[:10]
-    result, val = nrms.predict_one(viewed, cands, 20)
-    print('result')
-    print_func(result)
-    print(val)
+if __name__ == '__main__':    
+    # parse command line arguments
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--model', type=str, default='./lightning_logs/ranger/v3/epoch=30-auroc=0.89.ckpt')
+    args = parser.parse_args()
+    
+
+    nrms = Model.load_from_checkpoint(args.model)
+    test_dataset = TestDataset('./data', None)
+    
+    for i in test_dataset:
+        impid, viewed, cands = i
+        result, val = nrms.predict_one(viewed, cands, len(cands)) 
+        break
+
+    
+    
