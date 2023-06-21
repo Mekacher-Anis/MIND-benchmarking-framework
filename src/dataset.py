@@ -207,11 +207,12 @@ class TestDataset(data.Dataset):
         with open(os.path.join(self.paths['test'], 'behaviors.tsv')) as f:
             self.behaviors = pd.read_csv(f, sep='\t', header=None)
             self.behaviors.columns = ['id', 'user_id', 'time', 'history', 'impressions']
-            self.history = self.behaviors['history'].apply(lambda x: x.split(' '))
-            self.impressions = self.behaviors['impressions'].apply(lambda x: x.split(' '))
+            self.behaviors['history'] = self.behaviors['history'].str.split(' ')
+            self.behaviors['impressions'] = self.behaviors['impressions'].str.split(' ')
             
         self.maxlen = maxlen
-        self.w2id = w2v.key_to_index
+        if w2v is not None:
+            self.w2id = w2v.key_to_index
 
 
     def sent2idx(self, tokens: List[str]):
@@ -228,9 +229,9 @@ class TestDataset(data.Dataset):
         return len(self.behaviors.index)
     
     def __getitem__(self, idx: int):
-        history = self.behaviors[idx]['history']
-        impressions = self.behaviors[idx]['impressions']
-        impid = self.behaviors[idx]['id']
+        history = self.behaviors[self.behaviors.id == idx + 1]['history'].item()
+        impressions = self.behaviors[self.behaviors.id == idx + 1]['impressions'].item()
+        impid = self.behaviors[self.behaviors.id == idx + 1]['id'].item()
         history_enc = [self.news[self.news['id'] == p]['title'].item() for p in history]        
         cand_imp = [self.news[self.news['id'] == p]['title'].item() for p in impressions]
         return impid, history_enc, cand_imp

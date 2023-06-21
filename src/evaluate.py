@@ -79,7 +79,7 @@ if __name__ == '__main__':
     
 
     nrms = Model.load_from_checkpoint(args.model)
-    test_dataset = TestDataset('./data', None)
+    test_dataset = TestDataset('./data', None, dataset_size='large')
     
     for i in test_dataset:
         impid, viewed, cands = i
