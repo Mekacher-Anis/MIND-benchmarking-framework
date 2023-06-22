@@ -207,6 +207,7 @@ class TestDataset(data.Dataset):
         with open(os.path.join(self.paths['test'], 'behaviors.tsv')) as f:
             self.behaviors = pd.read_csv(f, sep='\t', header=None)
             self.behaviors.columns = ['id', 'user_id', 'time', 'history', 'impressions']
+            self.behaviors['history'] = self.behaviors['history'].fillna('')
             self.behaviors['history'] = self.behaviors['history'].str.split(' ')
             self.behaviors['impressions'] = self.behaviors['impressions'].str.split(' ')
             
@@ -229,15 +230,22 @@ class TestDataset(data.Dataset):
         return len(self.behaviors.index)
     
     def __getitem__(self, idx: int):
+        if not (self.behaviors.id == idx + 1).any():
+            return None
         history = self.behaviors[self.behaviors.id == idx + 1]['history'].item()
         impressions = self.behaviors[self.behaviors.id == idx + 1]['impressions'].item()
+        history_enc = [self.news[self.news['id'] == p]['title'] for p in history]
+        cand_imp = [self.news[self.news['id'] == p]['title'] for p in impressions]
         impid = self.behaviors[self.behaviors.id == idx + 1]['id'].item()
-        history_enc = [self.news[self.news['id'] == p]['title'].item() for p in history]        
-        cand_imp = [self.news[self.news['id'] == p]['title'].item() for p in impressions]
         return impid, history_enc, cand_imp
         # history_enc = [self.sent2idx(self.news[self.news['id'] == p]['title'].item()) for p in history]        
         # cand_imp = [self.sent2idx(self.news[self.news['id'] == p]['title'].item()) for p in impressions]
         # return impid, torch.LongTensor(history_enc), torch.LongTensor(cand_imp)
 
 if __name__ == '__main__':
-    download_mind('./data', 'large')
+    ds = TestDataset('./data', None, dataset_size='large')
+    for i in ds:
+        if not i:
+            break
+        print(i)
+        pass

@@ -8,7 +8,8 @@ import argparse
 from dataset import TestDataset
 from gensim.models import Word2Vec, KeyedVectors
 import gensim.downloader as api
-
+from torchtext.data import get_tokenizer
+import json
 
 class Model(pl.LightningModule):
     def __init__(self, hparams):
@@ -19,9 +20,9 @@ class Model(pl.LightningModule):
         self.model = NRMS(hparams["model"], torch.tensor(self.w2v.vectors))
         self.w2id = self.w2v.key_to_index
         
-        self.hparams = hparams
+        self.hparams.update(hparams)
         self.maxlen = hparams['data']['maxlen']
-        self.tokenizer = Tokenizer('k95763565C5F785B50546754545D77505F0325160B58173C17291B3D5E2500135001671C06272B3B06281E1E5E55A9F7EB80C0E58AD1EB50AC')
+        self.tokenizer = get_tokenizer("basic_english")
 
     def forward(self, viewed, cands, topk):
         """forward
@@ -52,7 +53,7 @@ class Model(pl.LightningModule):
         val = val.squeeze().detach().cpu().tolist()
 
         result = [cands[i] for i in idx.squeeze()]
-        return result, val
+        return result, val, idx.squeeze().detach().cpu().tolist()
     
     def sent2idx(self, tokens: List[str]):
         if ']' in tokens:
@@ -64,7 +65,7 @@ class Model(pl.LightningModule):
         return tokens
     
     def tokenize(self, sents: str):
-        return self.tokenizer.tokenize(sents)
+        return self.tokenizer(sents)
 
 
 def print_func(r):
@@ -78,13 +79,13 @@ if __name__ == '__main__':
     args = parser.parse_args()
     
 
-    nrms = Model.load_from_checkpoint(args.model)
+    nrms = Model.load_from_checkpoint(args.model, map_location='cuda')
     test_dataset = TestDataset('./data', None, dataset_size='large')
     
-    for i in test_dataset:
-        impid, viewed, cands = i
-        result, val = nrms.predict_one(viewed, cands, len(cands)) 
-        break
-
-    
-    
+    with open('./prediction.txt', 'w') as f:
+        for i in test_dataset:
+            if not i: break
+            impid, viewed, cands = i
+            result, val, orig_idx = nrms.predict_one(viewed, cands, len(cands))
+            preds = [orig_idx.index(idx) + 1 for idx in range(len(cands))]
+            f.write(f'{impid}\t{json.dumps(preds)}\n')

@@ -9,15 +9,15 @@ class DocEncoder(nn.Module):
         super(DocEncoder, self).__init__()
         self.hparams = hparams
         if weight is None:
-            self.embedding = nn.Embedding(100, 300)
+            self.embedding = nn.Embedding(100, 300, device='cuda')
         else:
-            self.embedding = nn.Embedding.from_pretrained(weight, freeze=False, padding_idx=0)
+            self.embedding = nn.Embedding.from_pretrained(weight.cuda(), freeze=False, padding_idx=0).cuda()
         self.mha = nn.MultiheadAttention(hparams['embed_size'], num_heads=hparams['nhead'], dropout=0.1)
         self.proj = nn.Linear(hparams['embed_size'], hparams['encoder_size'])
         self.additive_attn = AdditiveAttention(hparams['encoder_size'], hparams['v_size'])
     
     def forward(self, x):
-        x = F.dropout(self.embedding(x), 0.2)
+        x = F.dropout(self.embedding(x.cuda()), 0.2)
         x = x.permute(1, 0, 2)
         output, _ = self.mha(x, x, x)
         output = F.dropout(output.permute(1, 0, 2))
