@@ -193,8 +193,6 @@ if __name__ == "__main__":
     from config import hparams
     import os
 
-    os.environ["CUDA_VISIBLE_DEVICES"] = "1"
-
     model = Model(hparams)
 
     trainer = Trainer(max_epochs=50, accelerator="gpu", devices=1)

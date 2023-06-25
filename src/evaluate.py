@@ -1,3 +1,4 @@
+#!python
 import pytorch_lightning as pl
 from gensim.models import Word2Vec
 import torch
@@ -10,6 +11,13 @@ from gensim.models import Word2Vec, KeyedVectors
 import gensim.downloader as api
 from torchtext.data import get_tokenizer
 import json
+from tqdm import tqdm
+from torch.utils import data
+import os
+import logging
+
+logging.basicConfig(filename='/home/anis.mekacher/MIND-benchmarking-framework/evaluation.log', format='%(asctime)s %(message)s', level=logging.DEBUG)
+
 
 class Model(pl.LightningModule):
     def __init__(self, hparams):
@@ -19,10 +27,8 @@ class Model(pl.LightningModule):
             hparams["model"]["dct_size"] = len(self.w2v.key_to_index)
         self.model = NRMS(hparams["model"], torch.tensor(self.w2v.vectors))
         self.w2id = self.w2v.key_to_index
-        
         self.hparams.update(hparams)
         self.maxlen = hparams['data']['maxlen']
-        self.tokenizer = get_tokenizer("basic_english")
 
     def forward(self, viewed, cands, topk):
         """forward
@@ -38,7 +44,7 @@ class Model(pl.LightningModule):
         val, idx = logits.topk(topk)
         return idx, val
     
-    def predict_one(self, viewed, cands, topk):
+    def predict_one(self, viewed: torch.Tensor, cands: torch.Tensor, topk: int):
         """predict one user
 
         Args:
@@ -47,45 +53,37 @@ class Model(pl.LightningModule):
         Returns:
             topk of cands
         """
-        viewed_token = torch.tensor([self.sent2idx(v) for v in viewed]).unsqueeze(0)
-        cands_token = torch.tensor([self.sent2idx(c) for c in cands]).unsqueeze(0)
-        idx, val = self(viewed_token, cands_token, topk)
-        val = val.squeeze().detach().cpu().tolist()
+        idx, val = self(viewed, cands, topk)
+        # val = val.squeeze().detach().cpu().tolist()
 
-        result = [cands[i] for i in idx.squeeze()]
-        return result, val, idx.squeeze().detach().cpu().tolist()
-    
-    def sent2idx(self, tokens: List[str]):
-        if ']' in tokens:
-            tokens = tokens[tokens.index(']'):]
-        tokens = [self.w2id[token.strip()]
-                  for token in tokens if token.strip() in self.w2id.keys()]
-        tokens += [0] * (self.maxlen - len(tokens))
-        tokens = tokens[:self.maxlen]
-        return tokens
-    
-    def tokenize(self, sents: str):
-        return self.tokenizer(sents)
+        # result = [cands[i] for i in idx.squeeze()]
+        return None, val, idx.detach().cpu().tolist()
 
 
-def print_func(r):
-    for t in r:
-        print(''.join(t))
     
-if __name__ == '__main__':    
+if __name__ == '__main__':
+    logging.debug('Running main...')
     # parse command line arguments
     parser = argparse.ArgumentParser()
     parser.add_argument('--model', type=str, default='./lightning_logs/ranger/v3/epoch=30-auroc=0.89.ckpt')
     args = parser.parse_args()
+    device = torch.device('cuda')
     
+    with torch.no_grad():
+        logging.debug('Loding checkpoint...')
+        nrms = Model.load_from_checkpoint(args.model)
+        nrms = nrms.to(device)
+        logging.debug('Loading dataset...')
+        test_ds = TestDataset('/home/anis.mekacher/MIND-benchmarking-framework/data/large/test', nrms.w2v, dataset_size='large', device=device)
 
-    nrms = Model.load_from_checkpoint(args.model, map_location='cuda')
-    test_dataset = TestDataset('./data', None, dataset_size='large')
-    
-    with open('./prediction.txt', 'w') as f:
-        for i in test_dataset:
-            if not i: break
-            impid, viewed, cands = i
-            result, val, orig_idx = nrms.predict_one(viewed, cands, len(cands))
-            preds = [orig_idx.index(idx) + 1 for idx in range(len(cands))]
-            f.write(f'{impid}\t{json.dumps(preds)}\n')
+        logging.debug('Starting test...')
+        with open('/home/anis.mekacher/MIND-benchmarking-framework/prediction.txt', 'w') as f:
+            for i in tqdm(test_ds):
+                if not i: break
+                impid, viewed, cands = i
+                logging.debug(f'Doing batch which contains {len(impid)} test samples')
+                result, val, orig_idx = nrms.predict_one(viewed, cands, cands.shape[1])
+                logging.debug(f'Done with batch')
+                for _impid,_cand,_orig_idx in zip(impid, cands, orig_idx):
+                    preds = [_orig_idx.index(idx) + 1 for idx in range(_cand.shape[0])]
+                    f.write(f'{_impid.item()} {json.dumps(preds)}\n')

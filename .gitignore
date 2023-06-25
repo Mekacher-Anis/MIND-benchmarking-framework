@@ -5,3 +5,6 @@ data
 *.zip
 .*/
 __py*/
+*.log
+*.ckpt
+output/

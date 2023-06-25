@@ -9,4 +9,4 @@ recommenders[examples]
 torchmetrics
 tensorboard
 torchtext
-
+tqdm

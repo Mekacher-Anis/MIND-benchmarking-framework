@@ -10,6 +10,8 @@ import zipfile
 import os
 import json
 import pandas as pd
+from torchtext.data import get_tokenizer
+
 
 def download_mind(path: str, dataset_size: str):
     train_folder_path = os.path.join(path, dataset_size, 'train')
@@ -195,29 +197,47 @@ class ValDataset(Dataset):
 
 
 class TestDataset(data.Dataset):
-    def __init__(self, data_path: str, w2v, maxlen: int = 15, dataset_size: str = 'small'):
+    def __init__(self, data_path: str, w2v, maxlen: int = 15, dataset_size: str = 'small', device=torch.device('cuda')):
         self.dataset_size = dataset_size
-        self.paths = download_mind(data_path, dataset_size)
-        
-        with open(os.path.join(self.paths['test'], 'news.tsv')) as f:
-            self.news = pd.read_csv(f, sep='\t', header=None)
-            self.news.columns = ['id', 'category', 'subcategory', 'title', 'abstract', 'url', 'title_entities', 'abstract_entities']
-            self.news.drop_duplicates(subset=['title'], inplace=True)
-
-        with open(os.path.join(self.paths['test'], 'behaviors.tsv')) as f:
-            self.behaviors = pd.read_csv(f, sep='\t', header=None)
-            self.behaviors.columns = ['id', 'user_id', 'time', 'history', 'impressions']
-            self.behaviors['history'] = self.behaviors['history'].fillna('')
-            self.behaviors['history'] = self.behaviors['history'].str.split(' ')
-            self.behaviors['impressions'] = self.behaviors['impressions'].str.split(' ')
+        # self.paths = download_mind(data_path, dataset_size)
+        self.paths = {'test': data_path }
+        self.device = device
+        self.tokenizer = get_tokenizer("basic_english")
             
         self.maxlen = maxlen
         if w2v is not None:
             self.w2id = w2v.key_to_index
+        
+        if os.path.exists(os.path.join(self.paths['test'], 'news_parsed.pkl')):
+            self.news = pd.read_pickle(os.path.join(self.paths['test'], 'news_parsed.pkl'))
+        else:
+            with open(os.path.join(self.paths['test'], 'news.tsv')) as f:
+                self.news = pd.read_csv(f, sep='\t', header=None)
+                self.news.columns = ['id', 'category', 'subcategory', 'title', 'abstract', 'url', 'title_entities', 'abstract_entities']
+                self.news.set_index('id', inplace=True)
+                self.news.drop_duplicates(subset=['title'], inplace=True)
+                self.news['title_enc'] = self.news['title'].map(lambda sent: self.sent2idx(sent))
+
+        with open(os.path.join(self.paths['test'], 'behaviors.tsv')) as f:
+            self.behaviors = pd.read_csv(f, sep='\t', header=None)
+            self.behaviors.columns = ['id', 'user_id', 'time', 'history', 'impressions']
+            self.behaviors.set_index('id', inplace=True)
+            self.behaviors['history'] = self.behaviors['history'].fillna('')
+            self.behaviors['history'] = self.behaviors['history'].str.split(' ')
+            self.behaviors['impressions'] = self.behaviors['impressions'].str.split(' ')
+            
+        ele = [(id, len(x), len(y)) for id,x,y in zip(self.behaviors.index, self.behaviors['history'].to_list(), self.behaviors['impressions'].to_list())]
+        self.batches = {}
+        for id,x,y in ele:
+            if (x,y) in self.batches:
+                self.batches[(x,y)].append(id)
+            else:
+                self.batches[(x,y)] = [id]
+        self.batches_idx = list(self.batches.values())
 
 
-    def sent2idx(self, tokens: List[str]):
-        # tokens = tokens[3:]
+    def sent2idx(self, sentence: str):
+        tokens = self.tokenizer(sentence)
         if ']' in tokens:
             tokens = tokens[tokens.index(']'):]
         tokens = [self.w2id[token.strip()]
@@ -227,25 +247,35 @@ class TestDataset(data.Dataset):
         return tokens
 
     def __len__(self):
-        return len(self.behaviors.index)
+        return len(self.batches_idx)
     
     def __getitem__(self, idx: int):
-        if not (self.behaviors.id == idx + 1).any():
+        if idx >= len(self.batches_idx):
             return None
-        history = self.behaviors[self.behaviors.id == idx + 1]['history'].item()
-        impressions = self.behaviors[self.behaviors.id == idx + 1]['impressions'].item()
-        history_enc = [self.news[self.news['id'] == p]['title'] for p in history]
-        cand_imp = [self.news[self.news['id'] == p]['title'] for p in impressions]
-        impid = self.behaviors[self.behaviors.id == idx + 1]['id'].item()
-        return impid, history_enc, cand_imp
-        # history_enc = [self.sent2idx(self.news[self.news['id'] == p]['title'].item()) for p in history]        
-        # cand_imp = [self.sent2idx(self.news[self.news['id'] == p]['title'].item()) for p in impressions]
-        # return impid, torch.LongTensor(history_enc), torch.LongTensor(cand_imp)
+        (hist_size, impr_size), ids = list(self.batches.items())[idx]
+        impids = torch.zeros(len(ids), dtype=torch.int32, device=self.device)
+        histories = torch.zeros((len(ids), hist_size, self.maxlen), dtype=torch.long, device=self.device)
+        candidates = torch.zeros((len(ids), impr_size, self.maxlen), dtype=torch.long, device=self.device)
+        for i,id in enumerate(ids):
+            impid, viewed, cands = self.get_single_sample(id - 1)
+            impids[i] = impid
+            histories[i,:] = viewed
+            candidates[i,:] = cands
+        return impids, histories, candidates
+    
+    def get_single_sample(self, idx: int):
+        if not (idx + 1) in self.behaviors.index:
+            return None
+        history = self.behaviors.loc[idx+1]['history']
+        impressions = self.behaviors.loc[idx+1]['impressions']
+        history_enc = [self.news.loc[p]['title_enc'] for p in history if (p in self.news.index)]
+        history_enc += [[0] * self.maxlen] * (len(history) - len(history_enc))
+        cand_imp = [self.news.loc[p]['title_enc'] for p in impressions if (p in self.news.index)]
+        cand_imp += [[0] * self.maxlen] * (len(impressions) - len(cand_imp))
+
+        impid = idx + 1
+        return impid, torch.tensor(history_enc, device=self.device), torch.tensor(cand_imp, device=self.device)
 
 if __name__ == '__main__':
-    ds = TestDataset('./data', None, dataset_size='large')
-    for i in ds:
-        if not i:
-            break
-        print(i)
-        pass
+    ds = TestDataset(os.path.abspath('./data/large/test'), None, dataset_size='large')
+    print(ds[3])

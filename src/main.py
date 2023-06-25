@@ -14,7 +14,6 @@ parser.add_argument("--gpu", default="0")
 parser.add_argument("--epochs", default=50, type=int)
 args = parser.parse_args()
 
-os.environ["CUDA_VISIBLE_DEVICES"] = args.gpu
 
 model = Model(hparams)
 checkpoint_callback = ModelCheckpoint(
