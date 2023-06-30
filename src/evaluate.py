@@ -16,9 +16,6 @@ from torch.utils import data
 import os
 import logging
 
-logging.basicConfig(filename='/home/anis.mekacher/MIND-benchmarking-framework/evaluation.log', format='%(asctime)s %(message)s', level=logging.DEBUG)
-
-
 class Model(pl.LightningModule):
     def __init__(self, hparams):
         super(Model, self).__init__()
@@ -62,22 +59,26 @@ class Model(pl.LightningModule):
 
     
 if __name__ == '__main__':
-    logging.debug('Running main...')
     # parse command line arguments
     parser = argparse.ArgumentParser()
     parser.add_argument('--model', type=str, default='./lightning_logs/ranger/v3/epoch=30-auroc=0.89.ckpt')
+    parser.add_argument('--abs-path', default="./", type=str)
     args = parser.parse_args()
     device = torch.device('cuda')
+    logging.basicConfig(filename=os.path.join(args.abs_path, 'output', 'evaluation.log'), format='%(asctime)s %(message)s', level=logging.DEBUG)
+    
+    logging.debug('Running main...')
+    
     
     with torch.no_grad():
         logging.debug('Loding checkpoint...')
         nrms = Model.load_from_checkpoint(args.model)
         nrms = nrms.to(device)
         logging.debug('Loading dataset...')
-        test_ds = TestDataset('/home/anis.mekacher/MIND-benchmarking-framework/data/large/test', nrms.w2v, dataset_size='large', device=device)
+        test_ds = TestDataset(os.path.join(args.abs_path, 'data/large/test'), nrms.w2v, dataset_size='large', device=device)
 
         logging.debug('Starting test...')
-        with open('/home/anis.mekacher/MIND-benchmarking-framework/prediction.txt', 'w') as f:
+        with open(os.path.join(args.abs_path, 'output', 'prediction.txt'), 'w') as f:
             for i in tqdm(test_ds):
                 if not i: break
                 impid, viewed, cands = i
