@@ -14,7 +14,7 @@ import torchmetrics
 
 
 class Model(pl.LightningModule):
-    def __init__(self, hparams):
+    def __init__(self, hparams, abs_path = './'):
         super(Model, self).__init__()
         self.w2v: KeyedVectors = api.load(hparams["pretrained_model"])
         if hparams["model"]["dct_size"] == "auto":
@@ -23,6 +23,7 @@ class Model(pl.LightningModule):
         self.save_hyperparameters(hparams)
         self.automatic_optimization = False
         self.training_step_outputs = []
+        self.abs_path = abs_path
 
     def configure_optimizers(self):
         # return torch.optim.Adam(self.parameters(), lr=self.hparams['lr'], weight_decay=1e-5)
@@ -37,7 +38,7 @@ class Model(pl.LightningModule):
         """
         d = self.hparams["data"]
         self.train_ds = Dataset(
-            "./data",
+            os.path.join(self.abs_path, "data"),
             self.w2v,
             maxlen=self.hparams["data"]["maxlen"],
             pos_num=d["pos_k"],
@@ -45,7 +46,7 @@ class Model(pl.LightningModule):
             dataset_size=d["dataset_size"],
         )
         self.val_ds = ValDataset(
-            5, "./data", self.w2v
+            5, os.path.join(self.abs_path, "data"), self.w2v
         )
         tmp = [t.unsqueeze(0) for t in self.train_ds[0]]
         self.logger.experiment.add_graph(self.model, tmp)

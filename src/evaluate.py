@@ -86,4 +86,5 @@ if __name__ == '__main__':
                 logging.debug(f'Done with batch')
                 for _impid,_cand,_orig_idx in zip(impid, cands, orig_idx):
                     preds = [_orig_idx.index(idx) + 1 for idx in range(_cand.shape[0])]
-                    f.write(f'{_impid.item()} {json.dumps(preds)}\n')
+                    preds_str = json.dumps(preds, separators=(',', ':'));
+                    f.write(f'{_impid.item()} {preds_str}\n')

@@ -11,6 +11,9 @@ import os
 import json
 import pandas as pd
 from torchtext.data import get_tokenizer
+import pickle
+import gensim.downloader as api
+
 
 
 def download_mind(path: str, dataset_size: str):
@@ -24,16 +27,18 @@ def download_mind(path: str, dataset_size: str):
 
     # download zip files (recommenders doesn't download the test zip)
     train_zip_path, valid_zip_path = mind.download_mind(size=dataset_size, dest_path=os.path.join(path, dataset_size))
-    url = mind.URL_MIND[dataset_size][0].replace('train', 'test')
-    test_zip_path = download_utils.maybe_download(url=url, work_directory=os.path.join(path, dataset_size))
+    if dataset_size == 'large':
+        url = mind.URL_MIND[dataset_size][0].replace('train', 'test')
+        test_zip_path = download_utils.maybe_download(url=url, work_directory=os.path.join(path, dataset_size))
 
     # extract zip files
     with zipfile.ZipFile(train_zip_path, 'r') as zip_ref:
         zip_ref.extractall(train_folder_path)
     with zipfile.ZipFile(valid_zip_path, 'r') as zip_ref:
         zip_ref.extractall(valid_folder_path)
-    with zipfile.ZipFile(test_zip_path, 'r') as zip_ref:
-        zip_ref.extractall(test_folder_path)
+    if dataset_size == 'large':
+        with zipfile.ZipFile(test_zip_path, 'r') as zip_ref:
+            zip_ref.extractall(test_folder_path)
 
     # turn tsv to json files similar to the structure defined here
     # https://github.com/aqweteddy/NRMS-Pytorch
@@ -97,7 +102,7 @@ def mind2json(path: str, dataset_type: str):
     
 
 class Dataset(data.Dataset):
-    def __init__(self, data_path: str, w2v, maxlen: int = 15, pos_num: int = 1, neg_k: int = 4, dataset_size: str = 'small', data_type: str = 'train'):
+    def __init__(self, data_path: str, w2v, maxlen: int = 15, pos_num: int = 1, neg_k: int = 4, dataset_size: str = 'large', data_type: str = 'train'):
         self.dataset_size = dataset_size
         self.data_type = data_type
         self.paths = download_mind(data_path, dataset_size)
@@ -197,7 +202,7 @@ class ValDataset(Dataset):
 
 
 class TestDataset(data.Dataset):
-    def __init__(self, data_path: str, w2v, maxlen: int = 15, dataset_size: str = 'small', device=torch.device('cuda')):
+    def __init__(self, data_path: str, w2v, maxlen: int = 15, dataset_size: str = 'small', device=torch.device('cpu')):
         self.dataset_size = dataset_size
         # self.paths = download_mind(data_path, dataset_size)
         self.paths = {'test': data_path }
@@ -277,5 +282,23 @@ class TestDataset(data.Dataset):
         return impid, torch.tensor(history_enc, device=self.device), torch.tensor(cand_imp, device=self.device)
 
 if __name__ == '__main__':
-    ds = TestDataset(os.path.abspath('./data/large/test'), None, dataset_size='large')
-    print(ds[3])
+    from tqdm import tqdm
+    import lmdb
+    import pickle
+
+    if os.path.exists('./data/large/test/news_parsed.pkl'):
+        print('Loading dataset...')
+        ds = TestDataset(os.path.abspath('./data/large/test'), None, dataset_size='large')
+    else:
+        print('Loading w2v...')
+        w2v = api.load('word2vec-google-news-300')
+        print('Loading dataset...')
+        ds = TestDataset(os.path.abspath('./data/large/test'), w2v, dataset_size='large')
+        print('Dumping parsed news...')
+        ds.news.to_pickle('./data/large/test/news_parsed.pkl')
+    print('Parsing impressions...')
+    env = lmdb.open('./data/large/test/preprocessed', map_size=2**35)
+    with env.begin(write=True) as txn:
+        for i,val in tqdm(enumerate(ds)):
+            if val is None: break
+            txn.put(i.to_bytes(4, 'little'), pickle.dumps(val))

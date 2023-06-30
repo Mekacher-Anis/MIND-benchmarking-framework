@@ -10,3 +10,4 @@ torchmetrics
 tensorboard
 torchtext
 tqdm
+wandb
