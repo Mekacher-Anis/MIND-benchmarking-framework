@@ -7,5 +7,6 @@ Implemented models:
 - [x] [NRMS+Fastformer](https://arxiv.org/pdf/2108.09084v6.pdf) : the only description provided in the paper -as far as I could figure out- on how this is supposed to be implemented is this line
   > In addition, in the news recommendation task, following (Wu et al., 2019) we use Fastformer in a hierarchical way to first learn news embeddings
   > from news titles and then learn user embeddings from the embeddings of historical clicked news. We use Adam (Bengio and LeCun, 2015) for model optimization.
-  ¯\_(ツ)_/¯
+
+  ¯\\_(ツ)_/¯
 - [ ] Fastformer+PLM-NR : I still have no clue what they mean by this, I still need to decipher this one out...
