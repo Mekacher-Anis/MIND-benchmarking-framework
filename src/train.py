@@ -6,11 +6,11 @@ from pytorch_ranger import Ranger
 from dataset import Dataset, ValDataset
 from gensim.models import Word2Vec, KeyedVectors
 import gensim.downloader as api
-from models.nrms import NRMS
 from metric import ndcg_score, mrr_score
 from recommenders.datasets import mind
 import os
 import torchmetrics
+from models import FastformerNRMS
 
 
 class Model(pl.LightningModule):
@@ -19,7 +19,7 @@ class Model(pl.LightningModule):
         self.w2v: KeyedVectors = api.load(hparams["pretrained_model"])
         if hparams["model"]["dct_size"] == "auto":
             hparams["model"]["dct_size"] = len(self.w2v.key_to_index)
-        self.model = NRMS(hparams["model"], torch.tensor(self.w2v.vectors))
+        self.model = FastformerNRMS(hparams["model"], torch.tensor(self.w2v.vectors))
         self.save_hyperparameters(hparams)
         self.automatic_optimization = False
         self.training_step_outputs = []

@@ -19,7 +19,7 @@ os.environ["WANDB__SERVICE_WAIT"] = "300"
 
 
 
-model = Model(hparams)
+model = Model(hparams, abs_path=args.abs_path)
 checkpoint_callback = ModelCheckpoint(
     dirpath=os.path.join(args.abs_path, f'lightning_logs/{hparams["name"]}/{hparams["version"]}/'),
     filename="{epoch}-{auroc:.2f}",

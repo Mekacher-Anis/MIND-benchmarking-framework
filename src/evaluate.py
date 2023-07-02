@@ -2,6 +2,7 @@
 import pytorch_lightning as pl
 from gensim.models import Word2Vec
 import torch
+from models.fastformernrms.model import FastformerNRMS
 from models.nrms import NRMS
 from typing import List
 from gaisTokenizer import Tokenizer
@@ -22,7 +23,7 @@ class Model(pl.LightningModule):
         self.w2v: KeyedVectors = api.load(hparams["pretrained_model"])
         if hparams["model"]["dct_size"] == "auto":
             hparams["model"]["dct_size"] = len(self.w2v.key_to_index)
-        self.model = NRMS(hparams["model"], torch.tensor(self.w2v.vectors))
+        self.model = FastformerNRMS(hparams["model"], torch.tensor(self.w2v.vectors))
         self.w2id = self.w2v.key_to_index
         self.hparams.update(hparams)
         self.maxlen = hparams['data']['maxlen']
@@ -72,7 +73,7 @@ if __name__ == '__main__':
     
     with torch.no_grad():
         logging.debug('Loding checkpoint...')
-        nrms = Model.load_from_checkpoint(args.model)
+        nrms = Model.load_from_checkpoint(os.path.join(args.abs_path, args.model))
         nrms = nrms.to(device)
         logging.debug('Loading dataset...')
         test_ds = TestDataset(os.path.join(args.abs_path, 'data/large/test'), nrms.w2v, dataset_size='large', device=device)

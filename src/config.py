@@ -11,6 +11,7 @@ hparams = {
         'embed_size': 300,
         # 'self_attn_size': 400,
         'encoder_size': 250,
+        'maxlen': 15,
         'v_size': 200
     },
     'data': {

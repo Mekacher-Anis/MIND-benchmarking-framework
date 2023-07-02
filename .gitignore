@@ -8,3 +8,4 @@ __py*/
 *.log
 *.ckpt
 output/
+*.condor

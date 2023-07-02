@@ -11,3 +11,4 @@ tensorboard
 torchtext
 tqdm
 wandb
+rotary_embedding_torch
