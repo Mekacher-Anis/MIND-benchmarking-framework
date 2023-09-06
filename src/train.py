@@ -10,7 +10,7 @@ from metric import ndcg_score, mrr_score
 from recommenders.datasets import mind
 import os
 import torchmetrics
-from models import FastformerNRMS
+from models.fastformernrms.model import FastformerNRMS
 
 
 class Model(pl.LightningModule):
@@ -26,10 +26,10 @@ class Model(pl.LightningModule):
         self.abs_path = abs_path
 
     def configure_optimizers(self):
-        # return torch.optim.Adam(self.parameters(), lr=self.hparams['lr'], weight_decay=1e-5)
-        return pytorch_ranger.Ranger(
-            self.parameters(), lr=self.hparams["lr"], weight_decay=1e-5
-        )
+        return torch.optim.Adam(self.parameters(), lr=self.hparams['lr'], weight_decay=1e-5)
+        # return pytorch_ranger.Ranger(
+        #     self.parameters(), lr=self.hparams["lr"], weight_decay=1e-5
+        # )
 
     def prepare_data(self):
         """prepare_data
@@ -41,12 +41,18 @@ class Model(pl.LightningModule):
             os.path.join(self.abs_path, "data"),
             self.w2v,
             maxlen=self.hparams["data"]["maxlen"],
-            pos_num=d["pos_k"],
+            pos_num=d["max_hist"],
             neg_k=d["neg_k"],
             dataset_size=d["dataset_size"],
         )
         self.val_ds = ValDataset(
-            5, os.path.join(self.abs_path, "data"), self.w2v
+            5,
+            os.path.join(self.abs_path, "data"),
+            self.w2v,
+            maxlen=self.hparams["data"]["maxlen"],
+            pos_num=d["max_hist"],
+            neg_k=d["neg_k"],
+            dataset_size=d["dataset_size"],
         )
         tmp = [t.unsqueeze(0) for t in self.train_ds[0]]
         self.logger.experiment.add_graph(self.model, tmp)
@@ -109,6 +115,7 @@ class Model(pl.LightningModule):
         optimizer.zero_grad()
         
         self.training_step_outputs.append(loss)
+        self.log("train_loss", loss, on_step=True, on_epoch=False, prog_bar=True, logger=True)
 
         return {"loss": loss}
 
@@ -120,8 +127,8 @@ class Model(pl.LightningModule):
         """
         loss_mean = torch.stack(self.training_step_outputs).mean()
         logs = {"train_loss": loss_mean}
+        self.log("train_loss", loss_mean, on_step=False, on_epoch=True, prog_bar=True, logger=True)
         self.model.eval()
-
         # self.logger.log_metrics(logs, self.current_epoch)
         return {"progress_bar": logs, "log": logs}
     
@@ -171,7 +178,6 @@ class Model(pl.LightningModule):
         Arguments:
             outputs: list of training_step output
         """
-        print(self.val_output_list)
         mrr = torch.tensor([x["mrr"] for x in self.val_output_list])
         auroc = torch.tensor([x["auroc"] for x in self.val_output_list])
         ndcg5 = torch.tensor([x["ndcg5"] for x in self.val_output_list])
@@ -183,8 +189,8 @@ class Model(pl.LightningModule):
             "ndcg@5": ndcg5.mean(),
             "ndcg@10": ndcg10.mean(),
         }
-        self.log("auroc", logs["auroc"], prog_bar=True)
-        self.logger.log_metrics(logs, self.current_epoch)
+        for k, v in logs.items():
+            self.log(k, v, prog_bar=True, logger=True)
         self.model.train()
         return {"progress_bar": logs, "log": logs}
 

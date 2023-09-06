@@ -7,14 +7,19 @@ from models.fastformer import Fastformer
 
 
 class FastformerNRMS(nn.Module):
-    def __init__(self, hparams, weight=None):
+    def __init__(self, hparams, weight=None, p=.2):
         super(FastformerNRMS, self).__init__()
         self.hparams = hparams
+        self.p = p
         self.doc_encoder = DocEncoder(hparams, weight=weight)
-        self.mha = Fastformer(dim = hparams['encoder_size'], heads = hparams['nhead'], max_seq_len = hparams['maxlen']).cuda()
-        self.proj = nn.Linear(hparams['encoder_size'], hparams['encoder_size']).cuda()
-        self.additive_attn = AdditiveAttention(hparams['encoder_size'], hparams['v_size']).cuda()
+        self.fastformer = Fastformer(
+            input_dim=hparams["embed_size"],
+            num_heads=hparams["nhead"],
+            head_dim=hparams["encoder_size"] // hparams["nhead"]
+        ).cuda()
+        self.additive_attn = AdditiveAttention(hparams['embed_size'], hparams['v_size']).cuda()
         self.criterion = nn.CrossEntropyLoss().cuda()
+        self.dropout = torch.nn.Dropout(self.p).cuda()
 
     def forward(self, clicks, cands, labels=None):
         """forward
@@ -23,29 +28,23 @@ class FastformerNRMS(nn.Module):
             clicks (tensor): [num_user, num_click_docs, seq_len]
             cands (tensor): [num_user, num_candidate_docs, seq_len]
         """
-        print('Clicks.shape : ',  clicks.shape)
-        print('cands.shape : ',  cands.shape)
         num_click_docs = clicks.shape[1]
         num_cand_docs = cands.shape[1]
         num_user = clicks.shape[0]
         seq_len = clicks.shape[2]
-        clicks = clicks.reshape(-1, seq_len)
-        cands = cands.reshape(-1, seq_len)
-        click_embed = self.doc_encoder(clicks)
-        cand_embed = self.doc_encoder(cands)
-        click_embed = click_embed.reshape(num_user, num_click_docs, -1)
-        cand_embed = cand_embed.reshape(num_user, num_cand_docs, -1)
-        # mask = torch.ones(click_embed.shape[1:]).cuda().bool()
-        mask = torch.ones(click_embed.shape[:2]).cuda().bool()
-        click_output = self.mha(click_embed, mask=mask)
-        click_output = F.dropout(click_output, 0.2)
+        clicks = clicks.reshape(-1, seq_len) # [B, seq_len]
+        cands = cands.reshape(-1, seq_len) # [B, seq_len]
+        click_embed = self.doc_encoder(clicks) # [B, embed_size]
+        cand_embed = self.doc_encoder(cands) # [B, embed_size]
+        click_embed = click_embed.reshape(num_user, num_click_docs, -1) # [B, num_click_docs, embed_size]
+        cand_embed = cand_embed.reshape(num_user, num_cand_docs, -1) # [B, num_cand_docs, embed_size]
+        click_output = self.fastformer(click_embed) # [B, num_click_docs, embed_size]
+        click_output = self.dropout(click_output) # [B, num_click_docs, embed_size]
 
-        click_repr = self.proj(click_output)
-        click_repr, _ = self.additive_attn(click_output)
-        logits = torch.bmm(click_repr.unsqueeze(1), cand_embed.permute(0, 2, 1)).squeeze(1).cuda() # [B, 1, hid], [B, 10, hid]
+        click_repr, _ = self.additive_attn(click_output) # [B, embed_size]
+        logits = torch.bmm(click_repr.unsqueeze(1), cand_embed.permute(0, 2, 1)).squeeze(1).cuda() # [B, num_cand_docs]
         if labels is not None:
             labels = labels.cuda()
             loss = self.criterion(logits, labels)
             return loss, logits
-        return torch.sigmoid(logits)
-        # return torch.softmax(logits, -1)
+        return logits

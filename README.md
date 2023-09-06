@@ -10,3 +10,27 @@ Implemented models:
 
   ¯\\\_(ツ)_/¯
 - [ ] Fastformer+PLM-NR : I still have no clue what they mean by this, I still need to decipher this one out...
+
+# Running the models
+- Create a conda environment and activate it
+- Install the requirements
+  ```
+  pip install -r requirements.txt
+  ```
+- Install and login to wandb https://docs.wandb.ai/quickstart
+- Run the following command to download and parse the tsv files
+  ```
+  python src/dataset_utils.py --action download --size large
+  ```
+- Run the following command to preprocess the news for inference
+  ```
+  python src/dataset_utils.py --action preprocess --size large
+  ```
+- Run the following command to train
+  ```
+  python src/main.py
+  ```
+- Run the following command to generate the `prediction.txt` file
+  ```
+  python src/evaluate.py --model paht_to_ckpt
+  ```

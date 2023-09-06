@@ -1,26 +1,36 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from models.nrms.attention import  AdditiveAttention
+from models.nrms.attention import AdditiveAttention
+from models.nrms.mha import MultiheadAttention
 
 
 class DocEncoder(nn.Module):
-    def __init__(self, hparams, weight=None) -> None:
+    def __init__(self, hparams, weight=None, p=0.2) -> None:
         super(DocEncoder, self).__init__()
         self.hparams = hparams
+        self.p = p
         if weight is None:
-            self.embedding = nn.Embedding(100, 300, device='cuda')
+            self.embedding = nn.Embedding(100, 300, device="cuda").cuda()
         else:
-            self.embedding = nn.Embedding.from_pretrained(weight.cuda(), freeze=False, padding_idx=0).cuda()
-        self.mha = nn.MultiheadAttention(hparams['embed_size'], num_heads=hparams['nhead'], dropout=0.1)
-        self.proj = nn.Linear(hparams['embed_size'], hparams['encoder_size'])
-        self.additive_attn = AdditiveAttention(hparams['encoder_size'], hparams['v_size'])
-    
+            print('Loading weights from pretrained embeddings')
+            self.embedding = nn.Embedding.from_pretrained(
+                weight.cuda(), freeze=False, padding_idx=0
+            ).cuda()
+        self.mha = MultiheadAttention(
+            input_dim=hparams["embed_size"],
+            num_heads=hparams["nhead"],
+            embed_dim=hparams["encoder_size"]
+        ).cuda()
+        self.additive_attn = AdditiveAttention(
+            hparams["encoder_size"], hparams["v_size"]
+        ).cuda()
+        self.dropout = torch.nn.Dropout(self.p).cuda()
+
     def forward(self, x):
-        x = F.dropout(self.embedding(x.cuda()), 0.2)
-        x = x.permute(1, 0, 2)
-        output, _ = self.mha(x, x, x)
-        output = F.dropout(output.permute(1, 0, 2))
-        output = self.proj(output)
-        output, _ = self.additive_attn(output)
-        return output
+        x = x.cuda()
+        x = self.dropout(self.embedding(x)).cuda() # [B, seq_len, embed_size]
+        output, _ = self.mha(x) # [B, seq_len, encoder_size]
+        output = self.dropout(output).cuda()
+        output, _ = self.additive_attn(output) # [B, encoder_size]
+        return output.cuda()

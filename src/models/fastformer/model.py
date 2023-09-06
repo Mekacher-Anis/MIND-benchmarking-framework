@@ -37,19 +37,19 @@ def FeedForward(dim, mult = 4):
 class Fastformer(nn.Module):
     def __init__(
         self,
-        dim,
+        input_dim,
         *,
-        heads = 8,
-        dim_head = 64,
+        num_heads = 8,
+        head_dim = 64,
         max_seq_len = None,
         pos_emb = None
     ):
         super().__init__()
-        inner_dim = heads * dim_head
-        self.heads = heads
-        self.scale = dim_head ** -0.5
+        inner_dim = num_heads * head_dim
+        self.heads = num_heads
+        self.scale = head_dim ** -0.5
 
-        self.to_qkv = nn.Linear(dim, inner_dim * 3, bias = False)
+        self.to_qkv = nn.Linear(input_dim, inner_dim * 3, bias = False)
 
         # rotary positional embedding
 
@@ -62,22 +62,25 @@ class Fastformer(nn.Module):
 
         kv_attn_proj_divisor = 1 if not exists(pos_emb) else 2
 
-        self.to_q_attn_logits = nn.Linear(dim_head, 1, bias = False)  # for projecting queries to query attention logits
-        self.to_k_attn_logits = nn.Linear(dim_head // kv_attn_proj_divisor, 1, bias = False)  # for projecting keys to key attention logits
+        self.to_q_attn_logits = nn.Linear(head_dim, 1, bias = False)  # for projecting queries to query attention logits
+        self.to_k_attn_logits = nn.Linear(head_dim // kv_attn_proj_divisor, 1, bias = False)  # for projecting keys to key attention logits
 
         # final transformation of values to "r" as in the paper
 
-        self.to_r = nn.Linear(dim_head // kv_attn_proj_divisor, dim_head)
+        self.to_r = nn.Linear(head_dim // kv_attn_proj_divisor, head_dim)
 
-        self.to_out = nn.Linear(inner_dim, dim)
+        self.to_out = nn.Linear(inner_dim, input_dim)
 
     def forward(self, x, mask = None):
+        # x has shape [B, seq_len, input_dim]
         n, device, h, use_rotary_emb = x.shape[1], x.device, self.heads, exists(self.pos_emb)
 
         qkv = self.to_qkv(x).chunk(3, dim = -1)
         q, k, v = map(lambda t: rearrange(t, 'b n (h d) -> b h n d', h = h), qkv)
 
         mask_value = -torch.finfo(x.dtype).max
+        if not mask:
+            mask = torch.ones(x.shape[:2], device=device).bool() # [batch, seq_length]
         mask = rearrange(mask, 'b n -> b () n')
 
         # if relative positional encoding is needed

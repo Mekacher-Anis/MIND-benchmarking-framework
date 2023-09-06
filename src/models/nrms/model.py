@@ -3,26 +3,23 @@ import torch.nn as nn
 import torch.nn.functional as F
 from models.nrms.doc_encoder import DocEncoder
 from models.nrms.attention import  AdditiveAttention
-from models.fastformer import Fastformer
+from models.nrms.mha import MultiheadAttention
 
 
 class NRMS(nn.Module):
-    def __init__(self, hparams, weight=None):
+    def __init__(self, hparams, weight=None, p=.2):
         super(NRMS, self).__init__()
         self.hparams = hparams
+        self.p = p
         self.doc_encoder = DocEncoder(hparams, weight=weight)
-        # proj = InProjContainer(nn.Linear(hparams['encoder_size'], hparams['encoder_size']),
-        #                        nn.Linear(hparams['encoder_size'], hparams['encoder_size']),
-        #                        nn.Linear(hparams['encoder_size'], hparams['encoder_size']))
-        self.mha = nn.MultiheadAttention(hparams['encoder_size'], hparams['nhead'], dropout=0.1)
-
-        # self.mha = MultiheadAttentionContainer(nhead=hparams['nhead'],
-        #                                        in_proj_container=proj,
-        #                                        attention_layer=ScaledDotProduct(),
-        #                                        out_proj=nn.Linear(hparams['encoder_size'], hparams['encoder_size']))
-        self.proj = nn.Linear(hparams['encoder_size'], hparams['encoder_size'])
-        self.additive_attn = AdditiveAttention(hparams['encoder_size'], hparams['v_size'])
-        self.criterion = nn.CrossEntropyLoss()
+        self.mha = MultiheadAttention(
+            input_dim=hparams["encoder_size"],
+            num_heads=hparams["nhead"],
+            embed_dim=hparams["encoder_size"]
+        ).cuda()
+        self.additive_attn = AdditiveAttention(hparams['encoder_size'], hparams['v_size']).cuda()
+        self.criterion = nn.CrossEntropyLoss().cuda()
+        self.dropout = torch.nn.Dropout(self.p).cuda()
 
     def forward(self, clicks, cands, labels=None):
         """forward
@@ -35,21 +32,19 @@ class NRMS(nn.Module):
         num_cand_docs = cands.shape[1]
         num_user = clicks.shape[0]
         seq_len = clicks.shape[2]
-        clicks = clicks.reshape(-1, seq_len)
-        cands = cands.reshape(-1, seq_len)
-        click_embed = self.doc_encoder(clicks)
-        cand_embed = self.doc_encoder(cands)
-        click_embed = click_embed.reshape(num_user, num_click_docs, -1)
-        cand_embed = cand_embed.reshape(num_user, num_cand_docs, -1)
-        click_embed = click_embed.permute(1, 0, 2)
-        click_output, _ = self.mha(click_embed, click_embed, click_embed)
-        click_output = F.dropout(click_output.permute(1, 0, 2), 0.2)
+        clicks = clicks.reshape(-1, seq_len) # [B, seq_len]
+        cands = cands.reshape(-1, seq_len) # [B, seq_len]
+        click_embed = self.doc_encoder(clicks) # [B, encoder_size]
+        cand_embed = self.doc_encoder(cands) # [B, encoder_size]
+        click_embed = click_embed.reshape(num_user, num_click_docs, -1) # [B, num_click_docs, encoder_size]
+        cand_embed = cand_embed.reshape(num_user, num_cand_docs, -1) # [B, num_cand_docs, encoder_size]
+        click_output, _ = self.mha(click_embed) # [B, num_click_docs, encoder_size]
+        click_output = self.dropout(click_output) # [B, num_click_docs, encoder_size]
 
-        click_repr = self.proj(click_output)
-        click_repr, _ = self.additive_attn(click_output)
-        logits = torch.bmm(click_repr.unsqueeze(1), cand_embed.permute(0, 2, 1)).squeeze(1) # [B, 1, hid], [B, 10, hid]
+        click_repr, _ = self.additive_attn(click_output) # [B, encoder_size]
+        logits = torch.bmm(click_repr.unsqueeze(1), cand_embed.permute(0, 2, 1)).squeeze(1).cuda() # [B, num_cand_docs]
         if labels is not None:
+            labels = labels.cuda()
             loss = self.criterion(logits, labels)
             return loss, logits
-        return torch.sigmoid(logits)
-        # return torch.softmax(logits, -1)
+        return logits

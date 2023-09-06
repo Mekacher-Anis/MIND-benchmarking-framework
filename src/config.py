@@ -1,23 +1,22 @@
 hparams = {
     'batch_size': 100,
-    'lr': 5e-4,
+    'lr': 1e-4,
     'name': 'ranger',
     'version': 'v3',
-    'description': 'NRMS lr=5e-4, with weight_decay',
+    'description': 'FastformerNRMS',
     'pretrained_model': 'word2vec-google-news-300',
     'model': {
         'dct_size': 'auto',
-        'nhead': 10,
+        'nhead': 20,
         'embed_size': 300,
-        # 'self_attn_size': 400,
-        'encoder_size': 250,
-        'maxlen': 15,
+        'encoder_size': 400,
+        'maxlen': 30,
         'v_size': 200
     },
     'data': {
-        'pos_k': 1,
+        'max_hist': 100,
         'neg_k': 4,
-        'maxlen': 15,
+        'maxlen': 30,
         'dataset_size': 'large' # 'small', 'large', 'demo'     
     }
 }
